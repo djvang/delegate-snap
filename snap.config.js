@@ -3,7 +3,7 @@ const through = require('through2');
 module.exports = {
   cliOptions: {
     src: './src/index.ts',
-    port: 8090,
+    port: 8080,
   },
   bundlerCustomizer: (bundler) => {
     bundler.transform(function () {

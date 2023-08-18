@@ -1163,7 +1163,7 @@
       exports.satisfiesVersionRange = satisfiesVersionRange;
     }, {
       "./assert": 5,
-      "semver": 59,
+      "semver": 58,
       "superstruct": 76
     }],
     23: [function (require, module, exports) {
@@ -4311,7 +4311,7 @@
       }).call(this, require('_process'));
     }, {
       "./common": 28,
-      "_process": 31
+      "_process": 30
     }],
     28: [function (require, module, exports) {
       function setup(env) {
@@ -4547,255 +4547,6 @@
       };
     }, {}],
     30: [function (require, module, exports) {
-      'use strict';
-
-      const Yallist = require('yallist');
-      const MAX = Symbol('max');
-      const LENGTH = Symbol('length');
-      const LENGTH_CALCULATOR = Symbol('lengthCalculator');
-      const ALLOW_STALE = Symbol('allowStale');
-      const MAX_AGE = Symbol('maxAge');
-      const DISPOSE = Symbol('dispose');
-      const NO_DISPOSE_ON_SET = Symbol('noDisposeOnSet');
-      const LRU_LIST = Symbol('lruList');
-      const CACHE = Symbol('cache');
-      const UPDATE_AGE_ON_GET = Symbol('updateAgeOnGet');
-      const naiveLength = () => 1;
-      class LRUCache {
-        constructor(options) {
-          if (typeof options === 'number') options = {
-            max: options
-          };
-          if (!options) options = {};
-          if (options.max && (typeof options.max !== 'number' || options.max < 0)) throw new TypeError('max must be a non-negative number');
-          const max = this[MAX] = options.max || Infinity;
-          const lc = options.length || naiveLength;
-          this[LENGTH_CALCULATOR] = typeof lc !== 'function' ? naiveLength : lc;
-          this[ALLOW_STALE] = options.stale || false;
-          if (options.maxAge && typeof options.maxAge !== 'number') throw new TypeError('maxAge must be a number');
-          this[MAX_AGE] = options.maxAge || 0;
-          this[DISPOSE] = options.dispose;
-          this[NO_DISPOSE_ON_SET] = options.noDisposeOnSet || false;
-          this[UPDATE_AGE_ON_GET] = options.updateAgeOnGet || false;
-          this.reset();
-        }
-        set max(mL) {
-          if (typeof mL !== 'number' || mL < 0) throw new TypeError('max must be a non-negative number');
-          this[MAX] = mL || Infinity;
-          trim(this);
-        }
-        get max() {
-          return this[MAX];
-        }
-        set allowStale(allowStale) {
-          this[ALLOW_STALE] = !!allowStale;
-        }
-        get allowStale() {
-          return this[ALLOW_STALE];
-        }
-        set maxAge(mA) {
-          if (typeof mA !== 'number') throw new TypeError('maxAge must be a non-negative number');
-          this[MAX_AGE] = mA;
-          trim(this);
-        }
-        get maxAge() {
-          return this[MAX_AGE];
-        }
-        set lengthCalculator(lC) {
-          if (typeof lC !== 'function') lC = naiveLength;
-          if (lC !== this[LENGTH_CALCULATOR]) {
-            this[LENGTH_CALCULATOR] = lC;
-            this[LENGTH] = 0;
-            this[LRU_LIST].forEach(hit => {
-              hit.length = this[LENGTH_CALCULATOR](hit.value, hit.key);
-              this[LENGTH] += hit.length;
-            });
-          }
-          trim(this);
-        }
-        get lengthCalculator() {
-          return this[LENGTH_CALCULATOR];
-        }
-        get length() {
-          return this[LENGTH];
-        }
-        get itemCount() {
-          return this[LRU_LIST].length;
-        }
-        rforEach(fn, thisp) {
-          thisp = thisp || this;
-          for (let walker = this[LRU_LIST].tail; walker !== null;) {
-            const prev = walker.prev;
-            forEachStep(this, fn, walker, thisp);
-            walker = prev;
-          }
-        }
-        forEach(fn, thisp) {
-          thisp = thisp || this;
-          for (let walker = this[LRU_LIST].head; walker !== null;) {
-            const next = walker.next;
-            forEachStep(this, fn, walker, thisp);
-            walker = next;
-          }
-        }
-        keys() {
-          return this[LRU_LIST].toArray().map(k => k.key);
-        }
-        values() {
-          return this[LRU_LIST].toArray().map(k => k.value);
-        }
-        reset() {
-          if (this[DISPOSE] && this[LRU_LIST] && this[LRU_LIST].length) {
-            this[LRU_LIST].forEach(hit => this[DISPOSE](hit.key, hit.value));
-          }
-          this[CACHE] = new Map();
-          this[LRU_LIST] = new Yallist();
-          this[LENGTH] = 0;
-        }
-        dump() {
-          return this[LRU_LIST].map(hit => isStale(this, hit) ? false : {
-            k: hit.key,
-            v: hit.value,
-            e: hit.now + (hit.maxAge || 0)
-          }).toArray().filter(h => h);
-        }
-        dumpLru() {
-          return this[LRU_LIST];
-        }
-        set(key, value, maxAge) {
-          maxAge = maxAge || this[MAX_AGE];
-          if (maxAge && typeof maxAge !== 'number') throw new TypeError('maxAge must be a number');
-          const now = maxAge ? Date.now() : 0;
-          const len = this[LENGTH_CALCULATOR](value, key);
-          if (this[CACHE].has(key)) {
-            if (len > this[MAX]) {
-              del(this, this[CACHE].get(key));
-              return false;
-            }
-            const node = this[CACHE].get(key);
-            const item = node.value;
-            if (this[DISPOSE]) {
-              if (!this[NO_DISPOSE_ON_SET]) this[DISPOSE](key, item.value);
-            }
-            item.now = now;
-            item.maxAge = maxAge;
-            item.value = value;
-            this[LENGTH] += len - item.length;
-            item.length = len;
-            this.get(key);
-            trim(this);
-            return true;
-          }
-          const hit = new Entry(key, value, len, now, maxAge);
-          if (hit.length > this[MAX]) {
-            if (this[DISPOSE]) this[DISPOSE](key, value);
-            return false;
-          }
-          this[LENGTH] += hit.length;
-          this[LRU_LIST].unshift(hit);
-          this[CACHE].set(key, this[LRU_LIST].head);
-          trim(this);
-          return true;
-        }
-        has(key) {
-          if (!this[CACHE].has(key)) return false;
-          const hit = this[CACHE].get(key).value;
-          return !isStale(this, hit);
-        }
-        get(key) {
-          return get(this, key, true);
-        }
-        peek(key) {
-          return get(this, key, false);
-        }
-        pop() {
-          const node = this[LRU_LIST].tail;
-          if (!node) return null;
-          del(this, node);
-          return node.value;
-        }
-        del(key) {
-          del(this, this[CACHE].get(key));
-        }
-        load(arr) {
-          this.reset();
-          const now = Date.now();
-          for (let l = arr.length - 1; l >= 0; l--) {
-            const hit = arr[l];
-            const expiresAt = hit.e || 0;
-            if (expiresAt === 0) this.set(hit.k, hit.v);else {
-              const maxAge = expiresAt - now;
-              if (maxAge > 0) {
-                this.set(hit.k, hit.v, maxAge);
-              }
-            }
-          }
-        }
-        prune() {
-          this[CACHE].forEach((value, key) => get(this, key, false));
-        }
-      }
-      const get = (self, key, doUse) => {
-        const node = self[CACHE].get(key);
-        if (node) {
-          const hit = node.value;
-          if (isStale(self, hit)) {
-            del(self, node);
-            if (!self[ALLOW_STALE]) return undefined;
-          } else {
-            if (doUse) {
-              if (self[UPDATE_AGE_ON_GET]) node.value.now = Date.now();
-              self[LRU_LIST].unshiftNode(node);
-            }
-          }
-          return hit.value;
-        }
-      };
-      const isStale = (self, hit) => {
-        if (!hit || !hit.maxAge && !self[MAX_AGE]) return false;
-        const diff = Date.now() - hit.now;
-        return hit.maxAge ? diff > hit.maxAge : self[MAX_AGE] && diff > self[MAX_AGE];
-      };
-      const trim = self => {
-        if (self[LENGTH] > self[MAX]) {
-          for (let walker = self[LRU_LIST].tail; self[LENGTH] > self[MAX] && walker !== null;) {
-            const prev = walker.prev;
-            del(self, walker);
-            walker = prev;
-          }
-        }
-      };
-      const del = (self, node) => {
-        if (node) {
-          const hit = node.value;
-          if (self[DISPOSE]) self[DISPOSE](hit.key, hit.value);
-          self[LENGTH] -= hit.length;
-          self[CACHE].delete(hit.key);
-          self[LRU_LIST].removeNode(node);
-        }
-      };
-      class Entry {
-        constructor(key, value, length, now, maxAge) {
-          this.key = key;
-          this.value = value;
-          this.length = length;
-          this.now = now;
-          this.maxAge = maxAge || 0;
-        }
-      }
-      const forEachStep = (self, fn, node, thisp) => {
-        let hit = node.value;
-        if (isStale(self, hit)) {
-          del(self, node);
-          if (!self[ALLOW_STALE]) hit = undefined;
-        }
-        if (hit) fn.call(thisp, hit.value, hit.key, self);
-      };
-      module.exports = LRUCache;
-    }, {
-      "yallist": 78
-    }],
-    31: [function (require, module, exports) {
       var process = module.exports = {};
       var cachedSetTimeout;
       var cachedClearTimeout;
@@ -4952,7 +4703,7 @@
         return 0;
       };
     }, {}],
-    32: [function (require, module, exports) {
+    31: [function (require, module, exports) {
       const ANY = Symbol('SemVer ANY');
       class Comparator {
         static get ANY() {
@@ -5063,14 +4814,14 @@
       const SemVer = require('./semver');
       const Range = require('./range');
     }, {
-      "../functions/cmp": 36,
-      "../internal/debug": 61,
-      "../internal/parse-options": 63,
-      "../internal/re": 64,
-      "./range": 33,
-      "./semver": 34
+      "../functions/cmp": 35,
+      "../internal/debug": 60,
+      "../internal/parse-options": 62,
+      "../internal/re": 63,
+      "./range": 32,
+      "./semver": 33
     }],
-    33: [function (require, module, exports) {
+    32: [function (require, module, exports) {
       class Range {
         constructor(range, options) {
           options = parseOptions(options);
@@ -5091,7 +4842,7 @@
           this.loose = !!options.loose;
           this.includePrerelease = !!options.includePrerelease;
           this.raw = range.trim().split(/\s+/).join(' ');
-          this.set = this.raw.split('||').map(r => this.parseRange(r)).filter(c => c.length);
+          this.set = this.raw.split('||').map(r => this.parseRange(r.trim())).filter(c => c.length);
           if (!this.set.length) {
             throw new TypeError(`Invalid SemVer Range: ${this.raw}`);
           }
@@ -5427,15 +5178,15 @@
         return true;
       };
     }, {
-      "../internal/constants": 60,
-      "../internal/debug": 61,
-      "../internal/parse-options": 63,
-      "../internal/re": 64,
-      "./comparator": 32,
-      "./semver": 34,
-      "lru-cache": 30
+      "../internal/constants": 59,
+      "../internal/debug": 60,
+      "../internal/parse-options": 62,
+      "../internal/re": 63,
+      "./comparator": 31,
+      "./semver": 33,
+      "lru-cache": 64
     }],
-    34: [function (require, module, exports) {
+    33: [function (require, module, exports) {
       const debug = require('../internal/debug');
       const {
         MAX_LENGTH,
@@ -5678,13 +5429,13 @@
       }
       module.exports = SemVer;
     }, {
-      "../internal/constants": 60,
-      "../internal/debug": 61,
-      "../internal/identifiers": 62,
-      "../internal/parse-options": 63,
-      "../internal/re": 64
+      "../internal/constants": 59,
+      "../internal/debug": 60,
+      "../internal/identifiers": 61,
+      "../internal/parse-options": 62,
+      "../internal/re": 63
     }],
-    35: [function (require, module, exports) {
+    34: [function (require, module, exports) {
       const parse = require('./parse');
       const clean = (version, options) => {
         const s = parse(version.trim().replace(/^[=v]+/, ''), options);
@@ -5692,9 +5443,9 @@
       };
       module.exports = clean;
     }, {
-      "./parse": 51
+      "./parse": 50
     }],
-    36: [function (require, module, exports) {
+    35: [function (require, module, exports) {
       const eq = require('./eq');
       const neq = require('./neq');
       const gt = require('./gt');
@@ -5739,14 +5490,14 @@
       };
       module.exports = cmp;
     }, {
-      "./eq": 42,
-      "./gt": 43,
-      "./gte": 44,
-      "./lt": 46,
-      "./lte": 47,
-      "./neq": 50
+      "./eq": 41,
+      "./gt": 42,
+      "./gte": 43,
+      "./lt": 45,
+      "./lte": 46,
+      "./neq": 49
     }],
-    37: [function (require, module, exports) {
+    36: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const parse = require('./parse');
       const {
@@ -5784,11 +5535,11 @@
       };
       module.exports = coerce;
     }, {
-      "../classes/semver": 34,
-      "../internal/re": 64,
-      "./parse": 51
+      "../classes/semver": 33,
+      "../internal/re": 63,
+      "./parse": 50
     }],
-    38: [function (require, module, exports) {
+    37: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const compareBuild = (a, b, loose) => {
         const versionA = new SemVer(a, loose);
@@ -5797,23 +5548,23 @@
       };
       module.exports = compareBuild;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    39: [function (require, module, exports) {
+    38: [function (require, module, exports) {
       const compare = require('./compare');
       const compareLoose = (a, b) => compare(a, b, true);
       module.exports = compareLoose;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    40: [function (require, module, exports) {
+    39: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const compare = (a, b, loose) => new SemVer(a, loose).compare(new SemVer(b, loose));
       module.exports = compare;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    41: [function (require, module, exports) {
+    40: [function (require, module, exports) {
       const parse = require('./parse.js');
       const diff = (version1, version2) => {
         const v1 = parse(version1, null, true);
@@ -5853,30 +5604,30 @@
       };
       module.exports = diff;
     }, {
-      "./parse.js": 51
+      "./parse.js": 50
     }],
-    42: [function (require, module, exports) {
+    41: [function (require, module, exports) {
       const compare = require('./compare');
       const eq = (a, b, loose) => compare(a, b, loose) === 0;
       module.exports = eq;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    43: [function (require, module, exports) {
+    42: [function (require, module, exports) {
       const compare = require('./compare');
       const gt = (a, b, loose) => compare(a, b, loose) > 0;
       module.exports = gt;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    44: [function (require, module, exports) {
+    43: [function (require, module, exports) {
       const compare = require('./compare');
       const gte = (a, b, loose) => compare(a, b, loose) >= 0;
       module.exports = gte;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    45: [function (require, module, exports) {
+    44: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const inc = (version, release, options, identifier, identifierBase) => {
         if (typeof options === 'string') {
@@ -5892,44 +5643,44 @@
       };
       module.exports = inc;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    46: [function (require, module, exports) {
+    45: [function (require, module, exports) {
       const compare = require('./compare');
       const lt = (a, b, loose) => compare(a, b, loose) < 0;
       module.exports = lt;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    47: [function (require, module, exports) {
+    46: [function (require, module, exports) {
       const compare = require('./compare');
       const lte = (a, b, loose) => compare(a, b, loose) <= 0;
       module.exports = lte;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    48: [function (require, module, exports) {
+    47: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const major = (a, loose) => new SemVer(a, loose).major;
       module.exports = major;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    49: [function (require, module, exports) {
+    48: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const minor = (a, loose) => new SemVer(a, loose).minor;
       module.exports = minor;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    50: [function (require, module, exports) {
+    49: [function (require, module, exports) {
       const compare = require('./compare');
       const neq = (a, b, loose) => compare(a, b, loose) !== 0;
       module.exports = neq;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    51: [function (require, module, exports) {
+    50: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const parse = (version, options, throwErrors = false) => {
         if (version instanceof SemVer) {
@@ -5946,16 +5697,16 @@
       };
       module.exports = parse;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    52: [function (require, module, exports) {
+    51: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
       const patch = (a, loose) => new SemVer(a, loose).patch;
       module.exports = patch;
     }, {
-      "../classes/semver": 34
+      "../classes/semver": 33
     }],
-    53: [function (require, module, exports) {
+    52: [function (require, module, exports) {
       const parse = require('./parse');
       const prerelease = (version, options) => {
         const parsed = parse(version, options);
@@ -5963,23 +5714,23 @@
       };
       module.exports = prerelease;
     }, {
-      "./parse": 51
+      "./parse": 50
     }],
-    54: [function (require, module, exports) {
+    53: [function (require, module, exports) {
       const compare = require('./compare');
       const rcompare = (a, b, loose) => compare(b, a, loose);
       module.exports = rcompare;
     }, {
-      "./compare": 40
+      "./compare": 39
     }],
-    55: [function (require, module, exports) {
+    54: [function (require, module, exports) {
       const compareBuild = require('./compare-build');
       const rsort = (list, loose) => list.sort((a, b) => compareBuild(b, a, loose));
       module.exports = rsort;
     }, {
-      "./compare-build": 38
+      "./compare-build": 37
     }],
-    56: [function (require, module, exports) {
+    55: [function (require, module, exports) {
       const Range = require('../classes/range');
       const satisfies = (version, range, options) => {
         try {
@@ -5991,16 +5742,16 @@
       };
       module.exports = satisfies;
     }, {
-      "../classes/range": 33
+      "../classes/range": 32
     }],
-    57: [function (require, module, exports) {
+    56: [function (require, module, exports) {
       const compareBuild = require('./compare-build');
       const sort = (list, loose) => list.sort((a, b) => compareBuild(a, b, loose));
       module.exports = sort;
     }, {
-      "./compare-build": 38
+      "./compare-build": 37
     }],
-    58: [function (require, module, exports) {
+    57: [function (require, module, exports) {
       const parse = require('./parse');
       const valid = (version, options) => {
         const v = parse(version, options);
@@ -6008,9 +5759,9 @@
       };
       module.exports = valid;
     }, {
-      "./parse": 51
+      "./parse": 50
     }],
-    59: [function (require, module, exports) {
+    58: [function (require, module, exports) {
       const internalRe = require('./internal/re');
       const constants = require('./internal/constants');
       const SemVer = require('./classes/semver');
@@ -6100,36 +5851,36 @@
         rcompareIdentifiers: identifiers.rcompareIdentifiers
       };
     }, {
-      "./classes/comparator": 32,
-      "./classes/range": 33,
-      "./classes/semver": 34,
-      "./functions/clean": 35,
-      "./functions/cmp": 36,
-      "./functions/coerce": 37,
-      "./functions/compare": 40,
-      "./functions/compare-build": 38,
-      "./functions/compare-loose": 39,
-      "./functions/diff": 41,
-      "./functions/eq": 42,
-      "./functions/gt": 43,
-      "./functions/gte": 44,
-      "./functions/inc": 45,
-      "./functions/lt": 46,
-      "./functions/lte": 47,
-      "./functions/major": 48,
-      "./functions/minor": 49,
-      "./functions/neq": 50,
-      "./functions/parse": 51,
-      "./functions/patch": 52,
-      "./functions/prerelease": 53,
-      "./functions/rcompare": 54,
-      "./functions/rsort": 55,
-      "./functions/satisfies": 56,
-      "./functions/sort": 57,
-      "./functions/valid": 58,
-      "./internal/constants": 60,
-      "./internal/identifiers": 62,
-      "./internal/re": 64,
+      "./classes/comparator": 31,
+      "./classes/range": 32,
+      "./classes/semver": 33,
+      "./functions/clean": 34,
+      "./functions/cmp": 35,
+      "./functions/coerce": 36,
+      "./functions/compare": 39,
+      "./functions/compare-build": 37,
+      "./functions/compare-loose": 38,
+      "./functions/diff": 40,
+      "./functions/eq": 41,
+      "./functions/gt": 42,
+      "./functions/gte": 43,
+      "./functions/inc": 44,
+      "./functions/lt": 45,
+      "./functions/lte": 46,
+      "./functions/major": 47,
+      "./functions/minor": 48,
+      "./functions/neq": 49,
+      "./functions/parse": 50,
+      "./functions/patch": 51,
+      "./functions/prerelease": 52,
+      "./functions/rcompare": 53,
+      "./functions/rsort": 54,
+      "./functions/satisfies": 55,
+      "./functions/sort": 56,
+      "./functions/valid": 57,
+      "./internal/constants": 59,
+      "./internal/identifiers": 61,
+      "./internal/re": 63,
       "./ranges/gtr": 65,
       "./ranges/intersects": 66,
       "./ranges/ltr": 67,
@@ -6142,7 +5893,7 @@
       "./ranges/to-comparators": 74,
       "./ranges/valid": 75
     }],
-    60: [function (require, module, exports) {
+    59: [function (require, module, exports) {
       const SEMVER_SPEC_VERSION = '2.0.0';
       const MAX_LENGTH = 256;
       const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER || 9007199254740991;
@@ -6160,7 +5911,7 @@
         FLAG_LOOSE: 0b010
       };
     }, {}],
-    61: [function (require, module, exports) {
+    60: [function (require, module, exports) {
       (function (process) {
         (function () {
           const debug = typeof process === 'object' && process.env && process.env.NODE_DEBUG && /\bsemver\b/i.test(process.env.NODE_DEBUG) ? (...args) => console.error('SEMVER', ...args) : () => {};
@@ -6168,9 +5919,9 @@
         }).call(this);
       }).call(this, require('_process'));
     }, {
-      "_process": 31
+      "_process": 30
     }],
-    62: [function (require, module, exports) {
+    61: [function (require, module, exports) {
       const numeric = /^[0-9]+$/;
       const compareIdentifiers = (a, b) => {
         const anum = numeric.test(a);
@@ -6187,7 +5938,7 @@
         rcompareIdentifiers
       };
     }, {}],
-    63: [function (require, module, exports) {
+    62: [function (require, module, exports) {
       const looseOption = Object.freeze({
         loose: true
       });
@@ -6203,10 +5954,11 @@
       };
       module.exports = parseOptions;
     }, {}],
-    64: [function (require, module, exports) {
+    63: [function (require, module, exports) {
       const {
         MAX_SAFE_COMPONENT_LENGTH,
-        MAX_SAFE_BUILD_LENGTH
+        MAX_SAFE_BUILD_LENGTH,
+        MAX_LENGTH
       } = require('./constants');
       const debug = require('./debug');
       exports = module.exports = {};
@@ -6216,7 +5968,7 @@
       const t = exports.t = {};
       let R = 0;
       const LETTERDASHNUMBER = '[a-zA-Z0-9-]';
-      const safeRegexReplacements = [['\\s', 1], ['\\d', MAX_SAFE_COMPONENT_LENGTH], [LETTERDASHNUMBER, MAX_SAFE_BUILD_LENGTH]];
+      const safeRegexReplacements = [['\\s', 1], ['\\d', MAX_LENGTH], [LETTERDASHNUMBER, MAX_SAFE_BUILD_LENGTH]];
       const makeSafeRegex = value => {
         for (const [token, max] of safeRegexReplacements) {
           value = value.split(`${token}*`).join(`${token}{0,${max}}`).split(`${token}+`).join(`${token}{1,${max}}`);
@@ -6276,8 +6028,257 @@
       createToken('GTE0', '^\\s*>=\\s*0\\.0\\.0\\s*$');
       createToken('GTE0PRE', '^\\s*>=\\s*0\\.0\\.0-0\\s*$');
     }, {
-      "./constants": 60,
-      "./debug": 61
+      "./constants": 59,
+      "./debug": 60
+    }],
+    64: [function (require, module, exports) {
+      'use strict';
+
+      const Yallist = require('yallist');
+      const MAX = Symbol('max');
+      const LENGTH = Symbol('length');
+      const LENGTH_CALCULATOR = Symbol('lengthCalculator');
+      const ALLOW_STALE = Symbol('allowStale');
+      const MAX_AGE = Symbol('maxAge');
+      const DISPOSE = Symbol('dispose');
+      const NO_DISPOSE_ON_SET = Symbol('noDisposeOnSet');
+      const LRU_LIST = Symbol('lruList');
+      const CACHE = Symbol('cache');
+      const UPDATE_AGE_ON_GET = Symbol('updateAgeOnGet');
+      const naiveLength = () => 1;
+      class LRUCache {
+        constructor(options) {
+          if (typeof options === 'number') options = {
+            max: options
+          };
+          if (!options) options = {};
+          if (options.max && (typeof options.max !== 'number' || options.max < 0)) throw new TypeError('max must be a non-negative number');
+          const max = this[MAX] = options.max || Infinity;
+          const lc = options.length || naiveLength;
+          this[LENGTH_CALCULATOR] = typeof lc !== 'function' ? naiveLength : lc;
+          this[ALLOW_STALE] = options.stale || false;
+          if (options.maxAge && typeof options.maxAge !== 'number') throw new TypeError('maxAge must be a number');
+          this[MAX_AGE] = options.maxAge || 0;
+          this[DISPOSE] = options.dispose;
+          this[NO_DISPOSE_ON_SET] = options.noDisposeOnSet || false;
+          this[UPDATE_AGE_ON_GET] = options.updateAgeOnGet || false;
+          this.reset();
+        }
+        set max(mL) {
+          if (typeof mL !== 'number' || mL < 0) throw new TypeError('max must be a non-negative number');
+          this[MAX] = mL || Infinity;
+          trim(this);
+        }
+        get max() {
+          return this[MAX];
+        }
+        set allowStale(allowStale) {
+          this[ALLOW_STALE] = !!allowStale;
+        }
+        get allowStale() {
+          return this[ALLOW_STALE];
+        }
+        set maxAge(mA) {
+          if (typeof mA !== 'number') throw new TypeError('maxAge must be a non-negative number');
+          this[MAX_AGE] = mA;
+          trim(this);
+        }
+        get maxAge() {
+          return this[MAX_AGE];
+        }
+        set lengthCalculator(lC) {
+          if (typeof lC !== 'function') lC = naiveLength;
+          if (lC !== this[LENGTH_CALCULATOR]) {
+            this[LENGTH_CALCULATOR] = lC;
+            this[LENGTH] = 0;
+            this[LRU_LIST].forEach(hit => {
+              hit.length = this[LENGTH_CALCULATOR](hit.value, hit.key);
+              this[LENGTH] += hit.length;
+            });
+          }
+          trim(this);
+        }
+        get lengthCalculator() {
+          return this[LENGTH_CALCULATOR];
+        }
+        get length() {
+          return this[LENGTH];
+        }
+        get itemCount() {
+          return this[LRU_LIST].length;
+        }
+        rforEach(fn, thisp) {
+          thisp = thisp || this;
+          for (let walker = this[LRU_LIST].tail; walker !== null;) {
+            const prev = walker.prev;
+            forEachStep(this, fn, walker, thisp);
+            walker = prev;
+          }
+        }
+        forEach(fn, thisp) {
+          thisp = thisp || this;
+          for (let walker = this[LRU_LIST].head; walker !== null;) {
+            const next = walker.next;
+            forEachStep(this, fn, walker, thisp);
+            walker = next;
+          }
+        }
+        keys() {
+          return this[LRU_LIST].toArray().map(k => k.key);
+        }
+        values() {
+          return this[LRU_LIST].toArray().map(k => k.value);
+        }
+        reset() {
+          if (this[DISPOSE] && this[LRU_LIST] && this[LRU_LIST].length) {
+            this[LRU_LIST].forEach(hit => this[DISPOSE](hit.key, hit.value));
+          }
+          this[CACHE] = new Map();
+          this[LRU_LIST] = new Yallist();
+          this[LENGTH] = 0;
+        }
+        dump() {
+          return this[LRU_LIST].map(hit => isStale(this, hit) ? false : {
+            k: hit.key,
+            v: hit.value,
+            e: hit.now + (hit.maxAge || 0)
+          }).toArray().filter(h => h);
+        }
+        dumpLru() {
+          return this[LRU_LIST];
+        }
+        set(key, value, maxAge) {
+          maxAge = maxAge || this[MAX_AGE];
+          if (maxAge && typeof maxAge !== 'number') throw new TypeError('maxAge must be a number');
+          const now = maxAge ? Date.now() : 0;
+          const len = this[LENGTH_CALCULATOR](value, key);
+          if (this[CACHE].has(key)) {
+            if (len > this[MAX]) {
+              del(this, this[CACHE].get(key));
+              return false;
+            }
+            const node = this[CACHE].get(key);
+            const item = node.value;
+            if (this[DISPOSE]) {
+              if (!this[NO_DISPOSE_ON_SET]) this[DISPOSE](key, item.value);
+            }
+            item.now = now;
+            item.maxAge = maxAge;
+            item.value = value;
+            this[LENGTH] += len - item.length;
+            item.length = len;
+            this.get(key);
+            trim(this);
+            return true;
+          }
+          const hit = new Entry(key, value, len, now, maxAge);
+          if (hit.length > this[MAX]) {
+            if (this[DISPOSE]) this[DISPOSE](key, value);
+            return false;
+          }
+          this[LENGTH] += hit.length;
+          this[LRU_LIST].unshift(hit);
+          this[CACHE].set(key, this[LRU_LIST].head);
+          trim(this);
+          return true;
+        }
+        has(key) {
+          if (!this[CACHE].has(key)) return false;
+          const hit = this[CACHE].get(key).value;
+          return !isStale(this, hit);
+        }
+        get(key) {
+          return get(this, key, true);
+        }
+        peek(key) {
+          return get(this, key, false);
+        }
+        pop() {
+          const node = this[LRU_LIST].tail;
+          if (!node) return null;
+          del(this, node);
+          return node.value;
+        }
+        del(key) {
+          del(this, this[CACHE].get(key));
+        }
+        load(arr) {
+          this.reset();
+          const now = Date.now();
+          for (let l = arr.length - 1; l >= 0; l--) {
+            const hit = arr[l];
+            const expiresAt = hit.e || 0;
+            if (expiresAt === 0) this.set(hit.k, hit.v);else {
+              const maxAge = expiresAt - now;
+              if (maxAge > 0) {
+                this.set(hit.k, hit.v, maxAge);
+              }
+            }
+          }
+        }
+        prune() {
+          this[CACHE].forEach((value, key) => get(this, key, false));
+        }
+      }
+      const get = (self, key, doUse) => {
+        const node = self[CACHE].get(key);
+        if (node) {
+          const hit = node.value;
+          if (isStale(self, hit)) {
+            del(self, node);
+            if (!self[ALLOW_STALE]) return undefined;
+          } else {
+            if (doUse) {
+              if (self[UPDATE_AGE_ON_GET]) node.value.now = Date.now();
+              self[LRU_LIST].unshiftNode(node);
+            }
+          }
+          return hit.value;
+        }
+      };
+      const isStale = (self, hit) => {
+        if (!hit || !hit.maxAge && !self[MAX_AGE]) return false;
+        const diff = Date.now() - hit.now;
+        return hit.maxAge ? diff > hit.maxAge : self[MAX_AGE] && diff > self[MAX_AGE];
+      };
+      const trim = self => {
+        if (self[LENGTH] > self[MAX]) {
+          for (let walker = self[LRU_LIST].tail; self[LENGTH] > self[MAX] && walker !== null;) {
+            const prev = walker.prev;
+            del(self, walker);
+            walker = prev;
+          }
+        }
+      };
+      const del = (self, node) => {
+        if (node) {
+          const hit = node.value;
+          if (self[DISPOSE]) self[DISPOSE](hit.key, hit.value);
+          self[LENGTH] -= hit.length;
+          self[CACHE].delete(hit.key);
+          self[LRU_LIST].removeNode(node);
+        }
+      };
+      class Entry {
+        constructor(key, value, length, now, maxAge) {
+          this.key = key;
+          this.value = value;
+          this.length = length;
+          this.now = now;
+          this.maxAge = maxAge || 0;
+        }
+      }
+      const forEachStep = (self, fn, node, thisp) => {
+        let hit = node.value;
+        if (isStale(self, hit)) {
+          del(self, node);
+          if (!self[ALLOW_STALE]) hit = undefined;
+        }
+        if (hit) fn.call(thisp, hit.value, hit.key, self);
+      };
+      module.exports = LRUCache;
+    }, {
+      "yallist": 78
     }],
     65: [function (require, module, exports) {
       const outside = require('./outside');
@@ -6295,7 +6296,7 @@
       };
       module.exports = intersects;
     }, {
-      "../classes/range": 33
+      "../classes/range": 32
     }],
     67: [function (require, module, exports) {
       const outside = require('./outside');
@@ -6328,8 +6329,8 @@
       };
       module.exports = maxSatisfying;
     }, {
-      "../classes/range": 33,
-      "../classes/semver": 34
+      "../classes/range": 32,
+      "../classes/semver": 33
     }],
     69: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
@@ -6355,8 +6356,8 @@
       };
       module.exports = minSatisfying;
     }, {
-      "../classes/range": 33,
-      "../classes/semver": 34
+      "../classes/range": 32,
+      "../classes/semver": 33
     }],
     70: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
@@ -6410,9 +6411,9 @@
       };
       module.exports = minVersion;
     }, {
-      "../classes/range": 33,
-      "../classes/semver": 34,
-      "../functions/gt": 43
+      "../classes/range": 32,
+      "../classes/semver": 33,
+      "../functions/gt": 42
     }],
     71: [function (require, module, exports) {
       const SemVer = require('../classes/semver');
@@ -6480,14 +6481,14 @@
       };
       module.exports = outside;
     }, {
-      "../classes/comparator": 32,
-      "../classes/range": 33,
-      "../classes/semver": 34,
-      "../functions/gt": 43,
-      "../functions/gte": 44,
-      "../functions/lt": 46,
-      "../functions/lte": 47,
-      "../functions/satisfies": 56
+      "../classes/comparator": 31,
+      "../classes/range": 32,
+      "../classes/semver": 33,
+      "../functions/gt": 42,
+      "../functions/gte": 43,
+      "../functions/lt": 45,
+      "../functions/lte": 46,
+      "../functions/satisfies": 55
     }],
     72: [function (require, module, exports) {
       const satisfies = require('../functions/satisfies.js');
@@ -6534,8 +6535,8 @@
         return simplified.length < original.length ? simplified : range;
       };
     }, {
-      "../functions/compare.js": 40,
-      "../functions/satisfies.js": 56
+      "../functions/compare.js": 39,
+      "../functions/satisfies.js": 55
     }],
     73: [function (require, module, exports) {
       const Range = require('../classes/range.js');
@@ -6696,17 +6697,17 @@
       };
       module.exports = subset;
     }, {
-      "../classes/comparator.js": 32,
-      "../classes/range.js": 33,
-      "../functions/compare.js": 40,
-      "../functions/satisfies.js": 56
+      "../classes/comparator.js": 31,
+      "../classes/range.js": 32,
+      "../functions/compare.js": 39,
+      "../functions/satisfies.js": 55
     }],
     74: [function (require, module, exports) {
       const Range = require('../classes/range');
       const toComparators = (range, options) => new Range(range, options).set.map(comp => comp.map(c => c.value).join(' ').trim().split(' '));
       module.exports = toComparators;
     }, {
-      "../classes/range": 33
+      "../classes/range": 32
     }],
     75: [function (require, module, exports) {
       const Range = require('../classes/range');
@@ -6719,7 +6720,7 @@
       };
       module.exports = validRange;
     }, {
-      "../classes/range": 33
+      "../classes/range": 32
     }],
     76: [function (require, module, exports) {
       (function (global, factory) {
