@@ -10,14 +10,15 @@ called.
 - [VIDEO](https://youtu.be/3Fn0y-SZOpQ)
 - [NPM](https://www.npmjs.com/package/@ivan_holvinov/delegate-snap)
 
-## Flow
+## Steps to test
 
 ```
-- Authentication via "Metamask Flask";
-- Allow "Web Notifications" to receive messages from the backend and send messages to "Metamask snap";
-- When creating a "Borrow Funds (Loan)" contract, we send a message that the contract has been created;
-- when signing the contract, we ask the user for permission to sign;
-- after signing, we send the other party a link to the contract signature;
-- after signing by the second party, we send a message to the first party that the second party has signed or rejected;
-- if we make changes to the contract, we also send notifications
+1. Open a [site](https://delegate-contracts-twa-web-snap.vercel.app/)
+2. Authenticate via "Metamask Flask";
+3. Allow "Web Notifications" to receive messages from the backend and send messages to "Metamask snap";
+4. Create a contract (we recommend - Loan contract, as because it has the shortest quiz).
+5. After the creation copy the share link and send it to second person.
+6. Sign/reject contract by second person
+7. See notification was sent via Metamask.
+P.S. You can also check another notification such as: (decline, ask to change, etc)? for this you need to use such action.`
 ```
