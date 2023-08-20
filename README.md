@@ -8,6 +8,7 @@ called.
 
 - [SITE](https://delegate-contracts-twa-web-snap.vercel.app/)
 - [VIDEO](https://youtu.be/3Fn0y-SZOpQ)
+- [NPM](https://www.npmjs.com/package/@ivan_holvinov/delegate-snap)
 
 ## Flow
 
